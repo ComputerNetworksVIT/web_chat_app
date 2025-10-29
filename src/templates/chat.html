@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chat Room</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <style>
+    body { margin:0; font-family:"Times New Roman", serif; background:#111; color:#fff; display:flex; height:100vh; }
+    .sidebar { width:260px; background:#222; padding:16px 16px 120px; border-right:1px solid #333; box-sizing:border-box; overflow-y:auto; position:relative; }
+    .sidebar h2 { font-size:18px; margin:4px 0 12px; }
+    .empty-state { color:#aaa; font-size:14px; padding:8px 0; }
+
+    .user { display:block; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid #2f2f2f; }
+    .user.selected { background:#1b1b1b; border-radius:8px; padding:8px; }
+    .user-header { display:flex; align-items:center; gap:10px; cursor:pointer; }
+    .avatar { width:32px; height:32px; border-radius:50%; background:#555; display:flex; justify-content:center; align-items:center; font-weight:bold; color:#fff; }
+    .user-name { font-size:15px; }
+    .user-actions { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+    .small-btn { padding:5px 10px; border-radius:6px; border:none; background:#3d3d3d; color:#fff; cursor:pointer; font-size:12px; transition:background .2s; }
+    .small-btn:hover { background:#5c5c5c; }
+    .small-btn.ghost { background:transparent; border:1px solid #3d3d3d; }
+    .small-btn.disabled, .small-btn:disabled { opacity:.5; cursor:default; }
+
+    .chat-container { flex:1; display:flex; flex-direction:column; padding:16px; box-sizing:border-box; }
+    .chat-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .peer-title { font-size:18px; font-weight:bold; }
+    .state-note { font-size:13px; color:#bbb; }
+    .typing-note { font-size:12px; color:#9fd29f; min-height:18px; }
+
+    .messages { flex:1; overflow-y:auto; padding:10px; font-size:16px; line-height:1.4; display:flex; flex-direction:column; gap:8px; }
+    .bubble { max-width:70%; padding:8px 12px; border-radius:12px; word-wrap:break-word; background:#2a2a2a; position:relative; }
+    .row { display:flex; }
+    .row.other { justify-content:flex-start; }
+    .row.own { justify-content:flex-end; }
+    .bubble.own { background:#1e4f90; }
+    .meta { display:block; font-size:12px; color:#bbb; margin-top:4px; }
+    .ticks { position:absolute; right:8px; bottom:8px; font-size:12px; color:#bbb; }
+    .system { font-style:italic; color:#ddd; text-align:center; }
+
+    .input-area { display:flex; gap:8px; margin-top:12px; align-items:center; }
+    .input-area input[type="text"] { flex:1; padding:10px; border:none; border-radius:6px; background:#333; color:#fff; font-size:15px; }
+    .input-area button, .input-area label { padding:10px 12px; border:none; border-radius:6px; background:#555; color:#fff; cursor:pointer; }
+    .input-area input[type="file"] { display:none; }
+
+    .logout-btn { margin-top:12px; padding:10px; border:none; border-radius:6px; background:#c0392b; color:#fff; cursor:pointer; align-self:flex-start; }
+
+    .banner { background:#2b2b2b; padding:10px 12px; border-radius:8px; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+
+    .profile-footer { position:absolute; left:0; right:0; bottom:0; padding:10px 16px; background:#1a1a1a; border-top:1px solid #333; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .profile-left { display:flex; align-items:center; gap:10px; }
+    .profile-username { font-weight:bold; }
+    .mode-pill, .sec-pill, .rtt-pill { font-size:11px; padding:2px 8px; border-radius:999px; background:#2f2f2f; color:#ddd; }
+    .sec-pill, .rtt-pill { margin-left:6px; }
+
+    .debug { font-size:11px; color:#aaa; margin-top:6px; }
+
+    .file-link { color:#cfe3ff; text-decoration:underline; }
+    .preview { margin-top:6px; max-width:280px; border-radius:6px; cursor:zoom-in; }
+    video.preview { max-height:180px; cursor:default; }
+    .file-row { display:flex; align-items:center; gap:8px; }
+    .file-icon { width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; background:#3a3a3a; border-radius:4px; font-size:12px; }
+    .file-meta { font-size:12px; color:#bbb; }
+
+    #lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.85); align-items:center; justify-content:center; z-index:9999; }
+    #lightbox img { max-width:90%; max-height:90%; border-radius:8px; box-shadow:0 0 20px rgba(0,0,0,.6); }
+
+    .reactions { display:flex; gap:6px; margin-top:6px; font-size:14px; }
+    .reaction { background:rgba(255,255,255,.08); padding:2px 6px; border-radius:999px; }
+    .reaction-bar { display:none; position:absolute; bottom:100%; margin-bottom:6px; left:8px; background:#2c2c2c; border:1px solid #3a3a3a; border-radius:999px; padding:4px 6px; gap:6px; }
+    .bubble:hover .reaction-bar { display:flex; }
+    .reaction-btn { background:transparent; border:none; color:#fff; cursor:pointer; font-size:16px; line-height:1; }
+
+    .netinfo-toggle { margin-left:8px; }
+    .netinfo-panel { position:fixed; right:16px; bottom:16px; width:320px; background:#1a1a1a; border:1px solid #333; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.5); padding:12px; z-index:10000; display:none; }
+    .netinfo-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .netinfo-title { font-weight:bold; }
+    .netinfo-grid { display:grid; grid-template-columns:120px 1fr; gap:6px 10px; font-size:13px; }
+    .netinfo-label { color:#bbb; }
+    .netinfo-value { color:#fff; }
+    .netinfo-actions { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+    .pill-ok { color:#9fd29f; }
+    .pill-bad { color:#ff9b9b; }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <h2>Contacts</h2>
+    <div id="users"></div>
+    <div class="profile-footer">
+      <div class="profile-left">
+        <div class="avatar" id="myAvatar"></div>
+        <div>
+          <div class="profile-username" id="myUsername"></div>
+          <div>
+            <span class="mode-pill" id="routeMode">Not connected</span>
+            <span class="sec-pill" id="sslMode"></span>
+            <span class="rtt-pill" id="rttMode"></span>
+            <button class="small-btn netinfo-toggle" onclick="toggleNetInfo()">Network Info</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chat-container">
+    <div class="chat-header">
+      <div class="peer-title" id="peerTitle">Select a contact</div>
+      <div class="state-note" id="stateNote"></div>
+    </div>
+    <div class="typing-note" id="typingNote"></div>
+
+    <div id="bannerArea"></div>
+    <div class="messages" id="messages"></div>
+
+    <div class="input-area">
+      <label for="fileInput">Attach</label>
+      <input type="file" id="fileInput" />
+      <input type="text" id="messageInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter'){sendText();}">
+      <button onclick="sendText()">Send</button>
+    </div>
+
+    <button class="logout-btn" onclick="logout()">Logout</button>
+
+    <div class="debug" id="debugStatus"></div>
+  </div>
+
+  <div id="lightbox"><img id="lightboxImg" src=""/></div>
+
+  <div id="netInfo" class="netinfo-panel">
+    <div class="netinfo-header">
+      <div class="netinfo-title">Network Info</div>
+      <button class="small-btn ghost" onclick="toggleNetInfo()">Close</button>
+    </div>
+    <div class="netinfo-grid">
+      <div class="netinfo-label">Route</div><div class="netinfo-value" id="niRoute">-</div>
+      <div class="netinfo-label">WebSocket</div><div class="netinfo-value" id="niWS">-</div>
+      <div class="netinfo-label">ICE</div><div class="netinfo-value" id="niICE">-</div>
+      <div class="netinfo-label">DataChannel</div><div class="netinfo-value" id="niDC">-</div>
+      <div class="netinfo-label">RTT (avg)</div><div class="netinfo-value" id="niRTT">-</div>
+      <div class="netinfo-label">Protocol</div><div class="netinfo-value" id="niProto">-</div>
+      <div class="netinfo-label">Server</div><div class="netinfo-value" id="niServer">-</div>
+    </div>
+    <div class="netinfo-actions">
+      <button class="small-btn" onclick="runSpeedTest()">Speed Test</button>
+      <span id="speedLabel" style="font-size:12px;color:#bbb;"></span>
+    </div>
+  </div>
+
+  <script>
+    const username = localStorage.getItem("username");
+    if (!username) window.location.href = "/login";
+
+    const socket = io();
+
+    const usersDiv = document.getElementById("users");
+    const messagesDiv = document.getElementById("messages");
+    const bannerArea = document.getElementById("bannerArea");
+    const peerTitle = document.getElementById("peerTitle");
+    const stateNote = document.getElementById("stateNote");
+    const typingNote = document.getElementById("typingNote");
+    const myAvatar = document.getElementById("myAvatar");
+    const myUsernameEl = document.getElementById("myUsername");
+    const routeModeEl = document.getElementById("routeMode");
+    const sslModeEl = document.getElementById("sslMode");
+    const rttModeEl = document.getElementById("rttMode");
+    const debugStatus = document.getElementById("debugStatus");
+    const fileInput = document.getElementById("fileInput");
+    const lightbox = document.getElementById("lightbox");
+    const lightboxImg = document.getElementById("lightboxImg");
+
+    myAvatar.textContent = (username || "?").charAt(0).toUpperCase();
+    myUsernameEl.textContent = username || "";
+
+    const isSecure = location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    sslModeEl.textContent = isSecure ? "Secure" : "Insecure";
+
+    let activePeer = null;
+    let peerState = { connected:false, blockedByMe:false, blockedMe:false, pendingSent:false, pendingReceived:false };
+    let states = {};
+    let lastReceivedId = 0;
+
+    let typingSent = false;
+    let typingTimer = null;
+    const TYPING_TIMEOUT = 1500;
+
+    const reactionSets = new Map();
+
+    let pc = null, dc = null, p2pReady = false, p2pInitSide = null;
+
+    function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+    function setBanner(html){ bannerArea.innerHTML=""; if(html){const d=document.createElement("div"); d.className="banner"; d.innerHTML=html; bannerArea.appendChild(d);} }
+    function computeMode(){ if(!activePeer||!peerState.connected) return "Not connected"; return (p2pReady ? "P2P" : "Relay"); }
+    function updateHeader(){
+      routeModeEl.textContent = computeMode();
+      if(!activePeer){ peerTitle.textContent="Select a contact"; stateNote.textContent=""; setBanner(null); typingNote.textContent=""; return; }
+      peerTitle.textContent = `Chat with ${activePeer}`;
+      if (peerState.blockedByMe){ stateNote.textContent="You have blocked this user."; setBanner("You blocked this user. Unblock to message."); }
+      else if (peerState.blockedMe){ stateNote.textContent="This user has blocked you."; setBanner("This user has blocked you. You cannot send messages."); }
+      else if (!peerState.connected){
+        stateNote.textContent="Not connected.";
+        if (peerState.pendingReceived){
+          setBanner(`<span>${escapeHtml(activePeer)} wants to connect.</span><span><button class="small-btn" onclick="accept(activePeer)">Accept</button><button class="small-btn ghost" onclick="reject(activePeer)">Reject</button></span>`);
+        } else if (peerState.pendingSent){
+          setBanner(`<span>Request sent. Waiting for ${escapeHtml(activePeer)}.</span>`);
+        } else {
+          setBanner(`<span>Not connected. Send a connect request.</span><button class="small-btn" onclick="sendConnect(activePeer)">Connect</button>`);
+        }
+      } else {
+        stateNote.textContent=`Connected (${computeMode()})`;
+        setBanner(`<span>Connected with ${escapeHtml(activePeer)} — ${computeMode()}</span><button class="small-btn ghost" onclick="disconnectPeer(activePeer)">Disconnect</button>`);
+      }
+      updateNetInfo();
+    }
+
+    function ticksHTML(status){ if(status===2) return "✓✓"; if(status===1) return "✓"; return ""; }
+
+    function reactionBarHTML(){ return `<div class="reaction-bar">
+      <button class="reaction-btn" data-emo="👍">👍</button>
+      <button class="reaction-btn" data-emo="❤️">❤️</button>
+      <button class="reaction-btn" data-emo="😂">😂</button>
+    </div>`; }
+
+    function getReactionEntry(id){ let e=reactionSets.get(id); if(!e){e={}; reactionSets.set(id,e);} return e; }
+    function ensureReactionsContainer(b){ let c=b.querySelector('.reactions'); if(!c){ c=document.createElement('div'); c.className='reactions'; b.appendChild(c);} return c; }
+    function renderReactions(b){
+      const id=parseInt(b.dataset.id||"0",10); if(!id) return;
+      const entry=reactionSets.get(id)||{};
+      const cont=ensureReactionsContainer(b); cont.innerHTML='';
+      Object.entries(entry).forEach(([emo,set])=>{
+        const count=(set&&set.size)?set.size:0;
+        if(count>0){ const pill=document.createElement('span'); pill.className='reaction'; pill.textContent=`${emo} ${count}`; cont.appendChild(pill); }
+      });
+    }
+    function attachReactionBar(b){
+      if(!b) return;
+      if(!b.querySelector('.reaction-bar')) b.insertAdjacentHTML('afterbegin', reactionBarHTML());
+      const bar=b.querySelector('.reaction-bar'); if(!bar) return;
+      bar.addEventListener('click',(e)=>{
+        const btn=e.target.closest('.reaction-btn'); if(!btn) return;
+        const id=parseInt(b.dataset.id||'0',10); if(!id||!activePeer) return;
+        const emo=btn.getAttribute('data-emo');
+        const entry=getReactionEntry(id); const set=entry[emo]||(entry[emo]=new Set());
+        const already=set.has(username); const action=already?"remove":"add";
+        if(action==="add") set.add(username); else set.delete(username);
+        renderReactions(b);
+        socket.emit('toggle_reaction',{ to:activePeer, id, emoji:emo, action });
+      });
+    }
+
+    function messageRow(id,user,htmlContent,time,status){
+      const isOwn=user===username;
+      const row=document.createElement("div"); row.className="row "+(isOwn?"own":"other");
+      const bubble=document.createElement("div"); bubble.className="bubble "+(isOwn?"own":"other");
+      if(id) bubble.dataset.id=id;
+      bubble.innerHTML=`${reactionBarHTML()}${htmlContent}<span class="meta">${escapeHtml(time)}</span>`;
+      const ticks=document.createElement("span"); ticks.className="ticks"; ticks.textContent=isOwn?ticksHTML(status||0):""; bubble.appendChild(ticks);
+      row.appendChild(bubble); messagesDiv.appendChild(row); messagesDiv.scrollTop=messagesDiv.scrollHeight;
+      attachReactionBar(bubble); renderReactions(bubble);
+      return {row,bubble,ticks};
+    }
+
+    function addTextMessage(id,user,msg,time,status){
+      const html=`<strong>${escapeHtml(user)}</strong><br>${escapeHtml(msg)}`;
+      const {bubble}=messageRow(id,user,html,time,status);
+      if(id) getReactionEntry(id);
+      if(user!==username && id){ lastReceivedId=Math.max(lastReceivedId,id); socket.emit("mark_read",{ peer:user, up_to_id:lastReceivedId }); }
+      return bubble;
+    }
+
+    function openImage(url){ if(!url) return; lightboxImg.src=url; lightbox.style.display="flex"; }
+    lightbox.addEventListener("click",()=>{ lightbox.style.display="none"; lightboxImg.src=""; });
+
+    function fileTypeIcon(name){
+      const lower=(name||"").toLowerCase();
+      if(/\.(png|jpg|jpeg|gif|webp)$/.test(lower)) return "🖼";
+      if(/\.(mp4|webm|mov|avi|mkv)$/.test(lower)) return "🎞";
+      if(/\.pdf$/.test(lower)) return "📕";
+      if(/\.(doc|docx)$/.test(lower)) return "📃";
+      if(/\.(xls|xlsx)$/.test(lower)) return "📊";
+      if(/\.(ppt|pptx)$/.test(lower)) return "📑";
+      if(/\.(zip|rar|7z)$/.test(lower)) return "🗜";
+      if(/\.txt$/.test(lower)) return "🧾";
+      return "📄";
+    }
+    function humanSize(bytes){
+      const b=Number(bytes||0); if(b<1024) return b+" B";
+      const units=["KB","MB","GB","TB"]; let v=b/1024,i=0; while(v>=1024&&i<units.length-1){ v/=1024; i++; }
+      return v.toFixed(v<10?1:0)+" "+units[i];
+    }
+    function filePreviewHTML(url,name,size){
+      const lower=(name||"").toLowerCase(); const icon=fileTypeIcon(name); const sizeHtml=(size!=null)?` · ${humanSize(size)}`:"";
+      if(/\.(png|jpg|jpeg|gif|webp)$/.test(lower)){
+        return `<div class="file-row"><span class="file-icon">${icon}</span><a class="file-link" href="${url}" target="_blank">${escapeHtml(name)}</a><span class="file-meta">${sizeHtml}</span></div><img class="preview" src="${url}" alt="${escapeHtml(name)}" onclick="openImage('${url}')">`;
+      } else if (/\.(mp4|webm|mov)$/.test(lower)){
+        return `<div class="file-row"><span class="file-icon">${icon}</span><a class="file-link" href="${url}" target="_blank">${escapeHtml(name)}</a><span class="file-meta">${sizeHtml}</span></div><video class="preview" controls src="${url}"></video>`;
+      } else {
+        return `<div class="file-row"><span class="file-icon">${icon}</span><a class="file-link" href="${url}" target="_blank">${escapeHtml(name||"file")}</a><span class="file-meta">${sizeHtml}</span></div>`;
+      }
+    }
+    function addFileMessage(id,user,url,name,time,status,size){
+      const html=`<strong>${escapeHtml(user)}</strong><br>${url?filePreviewHTML(url,name,size):escapeHtml(name)}`;
+      const {bubble}=messageRow(id,user,html,time,status);
+      if(id) getReactionEntry(id);
+      if(user!==username && id){ lastReceivedId=Math.max(lastReceivedId,id); socket.emit("mark_read",{ peer:user, up_to_id:lastReceivedId }); }
+      return bubble;
+    }
+    function clearMessages(){ messagesDiv.innerHTML=""; }
+
+    function renderUsers(list){
+      usersDiv.innerHTML="";
+      const others=list.filter(u=>u!==username);
+      if(others.length===0){ const empty=document.createElement("div"); empty.className="empty-state"; empty.textContent="No other users online."; usersDiv.appendChild(empty); }
+      others.forEach(u=>{
+        const st=states[u]||{};
+        const container=document.createElement("div"); container.className="user"+(u===activePeer?" selected":"");
+        const header=document.createElement("div"); header.className="user-header"; header.onclick=()=>selectPeer(u);
+        const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=u.charAt(0).toUpperCase();
+        const name=document.createElement("div"); name.className="user-name"; name.textContent=u;
+        header.appendChild(avatar); header.appendChild(name);
+        const actions=document.createElement("div"); actions.className="user-actions";
+        if (st.blockedByMe){
+          const b=document.createElement("button"); b.className="small-btn"; b.textContent="Unblock"; b.onclick=(e)=>{e.stopPropagation();unblockUser(u);}; actions.appendChild(b);
+        } else {
+          if (st.connected){
+            const b=document.createElement("button"); b.className="small-btn ghost"; b.textContent="Disconnect"; b.onclick=(e)=>{e.stopPropagation();disconnectPeer(u);}; actions.appendChild(b);
+          } else if (st.pendingReceived){
+            const a=document.createElement("button"); a.className="small-btn"; a.textContent="Accept"; a.onclick=(e)=>{e.stopPropagation();accept(u);};
+            const r=document.createElement("button"); r.className="small-btn ghost"; r.textContent="Reject"; r.onclick=(e)=>{e.stopPropagation();reject(u);};
+            actions.appendChild(a); actions.appendChild(r);
+          } else if (st.pendingSent){
+            const rq=document.createElement("button"); rq.className="small-btn disabled"; rq.textContent="Requested"; rq.disabled=true; actions.appendChild(rq);
+          } else if (!st.blockedMe){
+            const c=document.createElement("button"); c.className="small-btn"; c.textContent="Connect"; c.onclick=(e)=>{e.stopPropagation();sendConnect(u);}; actions.appendChild(c);
+          }
+          const blk=document.createElement("button"); blk.className="small-btn ghost"; blk.textContent="Block"; blk.onclick=(e)=>{e.stopPropagation();blockUser(u);}; actions.appendChild(blk);
+        }
+        container.appendChild(header); container.appendChild(actions); usersDiv.appendChild(container);
+      });
+      if(!activePeer && others.length>0) selectPeer(others[0]);
+    }
+
+    function selectPeer(u){
+      if(u===username) return;
+      activePeer=u; clearMessages(); typingNote.textContent="";
+      socket.emit("select_peer",{ peer:u });
+      renderUsers(Object.keys(states).concat(username));
+      updateHeader();
+      if (peerState.connected) {
+ensureP2P();
+}
+    }
+    function accept(u){ socket.emit("respond_connection",{ to:u, accepted:true }); }
+    function reject(u){ socket.emit("respond_connection",{ to:u, accepted:false }); }
+    function sendConnect(u){ socket.emit("connect_request",{ to:u }); }
+    function blockUser(u){ socket.emit("block_user",{ user:u }); if(activePeer===u){ peerState.blockedByMe=true; peerState.connected=false; updateHeader(); resetP2P(); } }
+    function unblockUser(u){ socket.emit("unblock_user",{ user:u }); if(activePeer===u){ peerState.blockedByMe=false; updateHeader(); } }
+    function disconnectPeer(u){ socket.emit("disconnect_peer",{ user:u }); if(activePeer===u){ peerState.connected=false; updateHeader(); resetP2P(); } }
+
+    function sendText(){
+      const input=document.getElementById("messageInput");
+      const msg=input.value.trim();
+      if(!activePeer){ addSystemMessage("Select a contact first."); return; }
+      if(peerState.blockedByMe){ addSystemMessage("You blocked this user. Unblock to send."); return; }
+      if(peerState.blockedMe){ addSystemMessage("This user has blocked you."); return; }
+      if(!peerState.connected){ addSystemMessage("Not connected. Send a connect request and wait for acceptance."); return; }
+      if(!msg) return;
+      const now=new Date(); let h=now.getHours(), m=String(now.getMinutes()).padStart(2,'0'), ampm=h>=12?'PM':'AM'; h=h%12||12; const timeStr=`${h}:${m} ${ampm}`;
+      if(p2pReady && dc && dc.readyState==="open"){
+        try{
+          const bubble=addTextMessage(null,username,msg,timeStr,0);
+          bubble.dataset.pending="1"; const t=bubble.querySelector(".ticks"); if(t) t.textContent="";
+          dc.send(JSON.stringify({ type:"text", msg, time:timeStr }));
+          input.value=""; emitStopTyping();
+          setTimeout(()=>{ bubble.dataset.pending="0"; const tt=bubble.querySelector(".ticks"); if(tt) tt.textContent="✓"; },50);
+          return;
+        }catch(e){}
+      }
+      socket.emit("direct_message",{ to:activePeer, msg });
+      const bubble=addTextMessage(null,username,msg,timeStr,0);
+      bubble.dataset.pending="1"; const t=bubble.querySelector(".ticks"); if(t) t.textContent="";
+      input.value=""; emitStopTyping();
+    }
+
+    function scheduleTyping(){
+      if(!activePeer||!peerState.connected) return;
+      if(!typingSent){ socket.emit("typing",{ to:activePeer }); typingSent=true; }
+      if(typingTimer) clearTimeout(typingTimer);
+      typingTimer=setTimeout(()=>{ emitStopTyping(); }, TYPING_TIMEOUT);
+    }
+    function emitStopTyping(){
+      if(!typingSent||!activePeer) return;
+      socket.emit("stop_typing",{ to:activePeer }); typingSent=false;
+      if(typingTimer){ clearTimeout(typingTimer); typingTimer=null; }
+    }
+    const messageInput=document.getElementById("messageInput");
+    messageInput.addEventListener("input",scheduleTyping);
+    messageInput.addEventListener("keydown",(e)=>{ if(e.key==="Enter"&&!e.shiftKey){ setTimeout(emitStopTyping,0); } else { scheduleTyping(); } });
+    messageInput.addEventListener("blur",emitStopTyping);
+
+    socket.on("typing",d=>{ if(!d||d.from!==activePeer) return; typingNote.textContent=`${d.from} is typing…`; });
+    socket.on("stop_typing",d=>{ if(!d||d.from!==activePeer) return; typingNote.textContent=""; });
+
+    fileInput.addEventListener("change", async ()=>{
+      if(!activePeer){ addSystemMessage("Select a contact first."); fileInput.value=""; return; }
+      if(peerState.blockedByMe||peerState.blockedMe||!peerState.connected){ addSystemMessage("Cannot send file in current state."); fileInput.value=""; return; }
+      const file=fileInput.files[0]; if(!file) return;
+      const now=new Date(); let h=now.getHours(), m=String(now.getMinutes()).padStart(2,'0'), ampm=h>=12?'PM':'AM'; h=h%12||12; const timeStr=`${h}:${m} ${ampm}`;
+      const placeholder=addFileMessage(null,username,"",file.name,timeStr,0,file.size); placeholder.dataset.pending="1";
+      try{
+        const form=new FormData(); form.append("file",file); form.append("to",activePeer);
+        const res=await fetch("/upload",{ method:"POST", body:form });
+        let data; try{ data=await res.json(); } catch{ const txt=await res.text(); throw new Error(`Upload response not JSON (status ${res.status}): ${txt.slice(0,200)}`); }
+        if(!res.ok || !data.success) throw new Error(data && data.error ? data.error : `Upload failed with status ${res.status}`);
+        placeholder.dataset.id=data.id; placeholder.dataset.pending="0";
+        placeholder.innerHTML = `${reactionBarHTML()}<strong>${username}</strong><br>${filePreviewHTML(data.url,data.name,data.size)}<span class="meta">${data.time}</span><span class="ticks">✓</span>`;
+        attachReactionBar(placeholder); renderReactions(placeholder);
+      }catch(e){ addSystemMessage(`Upload error: ${e.message||e}`); }
+      finally{ fileInput.value=""; }
+    });
+
+    function addSystemMessage(text){ const row=document.createElement("div"); row.className="system"; row.textContent=text; messagesDiv.appendChild(row); messagesDiv.scrollTop=messagesDiv.scrollHeight; }
+
+    socket.on("message_saved",(d)=>{ const pending=[...document.querySelectorAll(".bubble.own[data-pending='1']")]; if(pending.length){ const b=pending[0]; b.dataset.id=d.id; b.dataset.pending="0"; const t=b.querySelector(".ticks"); if(t) t.textContent=""; getReactionEntry(d.id);} });
+    socket.on("message_delivered",(d)=>{ const b=document.querySelector(`.bubble.own[data-id='${d.id}'] .ticks`); if(b) b.textContent="✓"; });
+    socket.on("messages_read",(d)=>{ const bubbles=document.querySelectorAll(`.bubble.own[data-id]`); bubbles.forEach(el=>{ const id=parseInt(el.dataset.id||"0",10); if(id>0 && id<=d.up_to_id){ const t=el.querySelector(".ticks"); if(t) t.textContent="✓✓"; }}); });
+
+    socket.on("direct_message",d=>{ if(!d||d.from!==activePeer) return; addTextMessage(d.id,d.from,d.msg,d.time,1); });
+    socket.on("direct_file",d=>{ if(!d||d.from!==activePeer) return; addFileMessage(d.id,d.from,d.url,d.name,d.time,1,d.size); });
+
+    socket.on("reaction_update",d=>{
+      if(!d||typeof d.id!=="number"||!d.emoji||!d.by||!d.action) return;
+      const entry=getReactionEntry(d.id); const set=entry[d.emoji]||(entry[d.emoji]=new Set());
+      if(d.action==="add") set.add(d.by); else set.delete(d.by);
+      const bubble=document.querySelector(`.bubble[data-id='${d.id}']`); if(bubble) renderReactions(bubble);
+    });
+
+    socket.on("update_users",list=>{ socket.emit("get_states"); renderUsers(list); });
+    socket.on("user_states",st=>{ states=st||{}; const list=Object.keys(states).concat(username); renderUsers(list); if(activePeer && states[activePeer]){ peerState=states[activePeer]; updateHeader(); if(peerState.connected) ensureP2P(); else resetP2P(); } });
+    socket.on("chat_history",p=>{ if(!p) return; const {peer,history}=p; if(peer!==activePeer) return; clearMessages(); history.forEach(m=>{ if(m.kind==="file"){ const displayName=m.file_name || (m.file_url||"").split("/").pop(); addFileMessage(m.id,m.sender,m.file_url,displayName,m.time,(m.read?2:(m.delivered?1:0)),m.file_size); } else { addTextMessage(m.id,m.sender,m.msg,m.time,(m.read?2:(m.delivered?1:0))); } }); });
+    socket.on("peer_state",st=>{ if(!st||st.peer!==activePeer) return; peerState={ connected:!!st.connected, blockedByMe:!!st.blockedByMe, blockedMe:!!st.blockedMe, pendingSent:!!st.pendingSent, pendingReceived:!!st.pendingReceived }; updateHeader(); states[activePeer]={...peerState}; renderUsers(Object.keys(states).concat(username)); if(peerState.connected) ensureP2P(); else resetP2P(); });
+    socket.on("system_message",d=>{ if(d&&d.msg) addSystemMessage(d.msg); socket.emit("get_states"); if(activePeer) socket.emit("select_peer",{ peer:activePeer }); });
+
+    function logout(){ fetch("/logout",{ method:"POST" }).finally(()=>{ localStorage.removeItem("username"); socket.disconnect(); window.location.href="/login"; }); }
+
+    const RTC_CONFIG={ iceServers:[ {urls:["stun:stun.l.google.com:19302"]} ] };
+
+    function resetP2P(){ try{ if(dc) dc.close(); }catch{} try{ if(pc) pc.close(); }catch{} pc=null; dc=null; p2pReady=false; p2pInitSide=null; updateHeader(); }
+    async function ensureP2P(){
+      if(!activePeer||!peerState.connected){ resetP2P(); return; }
+      if(pc) return;
+      pc=new RTCPeerConnection(RTC_CONFIG); p2pInitSide="caller";
+      pc.onicecandidate=(e)=>{ if(e.candidate) socket.emit("rtc_ice",{ to:activePeer, candidate:e.candidate }); };
+      dc=pc.createDataChannel("chat"); bindDataChannel(dc);
+      const offer=await pc.createOffer(); await pc.setLocalDescription(offer); socket.emit("rtc_offer",{ to:activePeer, sdp:offer });
+      pc.oniceconnectionstatechange = updateNetInfo;
+    }
+    function bindDataChannel(channel){
+      channel.onopen=()=>{ p2pReady=true; updateHeader(); };
+      channel.onclose=()=>{ p2pReady=false; updateHeader(); };
+      channel.onerror=()=>{ p2pReady=false; updateHeader(); };
+      channel.onmessage=(evt)=>{ try{ const payload=JSON.parse(evt.data); if(payload.type==="text"){ addTextMessage(payload.id||null,activePeer,payload.msg,payload.time||"",1); } }catch{} };
+    }
+
+    socket.on("rtc_offer", async (d)=>{
+      if(!d||d.from!==activePeer) return;
+      if(!pc){
+        pc=new RTCPeerConnection(RTC_CONFIG); p2pInitSide="callee";
+        pc.onicecandidate=(e)=>{ if(e.candidate) socket.emit("rtc_ice",{ to:activePeer, candidate:e.candidate }); };
+        pc.ondatachannel=(e)=>{ dc=e.channel; bindDataChannel(dc); };
+        pc.oniceconnectionstatechange = updateNetInfo;
+      }
+      await pc.setRemoteDescription(new RTCSessionDescription(d.sdp));
+      const answer=await pc.createAnswer(); await pc.setLocalDescription(answer);
+      socket.emit("rtc_answer",{ to:activePeer, sdp:answer });
+    });
+    socket.on("rtc_answer", async (d)=>{ if(!d||d.from!==activePeer||!pc) return; await pc.setRemoteDescription(new RTCSessionDescription(d.sdp)); updateNetInfo(); });
+    socket.on("rtc_ice", async (d)=>{ if(!d||d.from!==activePeer||!pc||!d.candidate) return; try{ await pc.addIceCandidate(new RTCIceCandidate(d.candidate)); }catch{} updateNetInfo(); });
+
+    let rttSamples=[];
+    function pingLoop(){ const t=performance.now(); socket.emit("rtt_ping",{ t }); setTimeout(pingLoop,5000); }
+    socket.on("rtt_pong",({t})=>{ const rtt=Math.max(0,performance.now()-t); rttSamples.push(rtt); if(rttSamples.length>12) rttSamples.shift(); const avg=Math.round(rttSamples.reduce((a,b)=>a+b,0)/rttSamples.length); rttModeEl.textContent=`RTT ${avg}ms`; updateNetInfo(); });
+    pingLoop();
+
+    function setDebug(text){ debugStatus.textContent=text||""; }
+
+
+
+
+
+    let netInfoTimer=null;
+    function toggleNetInfo(){
+      const panel=document.getElementById("netInfo");
+      const isOpen=panel.style.display==="block";
+      panel.style.display=isOpen?"none":"block";
+      if(!isOpen){ updateNetInfo(); if(netInfoTimer) clearInterval(netInfoTimer); netInfoTimer=setInterval(updateNetInfo,1000); }
+      else { if(netInfoTimer){ clearInterval(netInfoTimer); netInfoTimer=null; } }
+    }
+    function updateNetInfo(){
+      const byId=id=>document.getElementById(id);
+      const safe=v=>v==null?"-":String(v);
+      byId("niRoute").textContent = safe(routeModeEl?.textContent || computeMode());
+      const wsOk = socket && socket.connected;
+      byId("niWS").innerHTML = wsOk ? '<span class="pill-ok">connected</span>' : '<span class="pill-bad">disconnected</span>';
+      const ice = pc?.iceConnectionState || "none";
+      const dcState = dc?.readyState || "none";
+      byId("niICE").textContent = ice;
+      byId("niDC").textContent = dcState;
+      byId("niRTT").textContent = safe(rttModeEl?.textContent || "");
+      byId("niProto").textContent = location.protocol.replace(":","").toUpperCase();
+      byId("niServer").textContent = `${location.hostname}:${location.port || (location.protocol==="https:"?"443":"80")}`;
+    }
+    if(socket){
+      socket.on("connect",updateNetInfo);
+      socket.on("disconnect",updateNetInfo);
+      socket.on("reconnect",updateNetInfo);
+    }
+
+
+
+
+
+
+
+    async function runSpeedTest(){
+      const label=document.getElementById("speedLabel");
+      label.textContent="Testing...";
+      try{
+        const start=performance.now();
+        const resp=await fetch("/speedtest?mb=20");
+        const reader=resp.body.getReader();
+        let received=0;
+        while(true){
+          const {done,value}=await reader.read();
+          if(done) break;
+          received+=value.byteLength;
+          const seconds=Math.max(.001,(performance.now()-start)/1000);
+          const mbps=(received*8/1e6)/seconds;
+          label.textContent=`Speed: ${mbps.toFixed(1)} Mbps`;
+        }
+        const totalSeconds=(performance.now()-start)/1000;
+        label.textContent+=`, ${(received/1e6).toFixed(1)} MB in ${totalSeconds.toFixed(1)}s`;
+      }catch(e){ label.textContent="Speed test failed"; }
+      updateNetInfo();
+    }
+  </script>
+</body>
+</html>

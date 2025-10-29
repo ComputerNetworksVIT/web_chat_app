@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Web Chat Application - Login</title>
+  <style>
+    body {
+      font-family: "Times New Roman", serif;
+      background-color: #111;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .form-container {
+      background-color: #1e1e1e;
+      padding: 30px;
+      border-radius: 12px;
+      width: 350px;
+      text-align: center;
+      box-shadow: 0px 0px 12px rgba(0,0,0,0.5);
+    }
+    h1 {
+      margin-bottom: 25px;
+      font-size: 26px;
+      font-weight: bold;
+    }
+    input[type="text"], input[type="password"] {
+      width: 90%;
+      padding: 10px;
+      margin: 8px 0;
+      border: none;
+      border-radius: 6px;
+      font-size: 15px;
+      background-color: #333;
+      color: white;
+    }
+    .checkbox-row {
+      margin: 8px 0;
+      text-align: left;
+      font-size: 14px;
+    }
+    .btn {
+      width: 95%;
+      padding: 12px;
+      margin: 8px 0;
+      border: none;
+      border-radius: 6px;
+      font-size: 15px;
+      cursor: pointer;
+      background-color: #555;
+      color: white;
+    }
+    .btn:hover {
+      background-color: #777;
+    }
+    .error {
+      color: #e74c3c;
+      margin-top: 10px;
+      font-size: 14px;
+      min-height: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="form-container">
+    <h1>Web Chat Application</h1>
+    <form id="authForm" onsubmit="return false;">
+      <input type="text" id="username" placeholder="Username" required><br>
+      <input type="password" id="password" placeholder="Password" required><br>
+      <div class="checkbox-row">
+        <input type="checkbox" id="showPassword"> Show Password
+      </div>
+      <button type="button" class="btn" onclick="register()">Register</button>
+      <button type="button" class="btn" onclick="login()">Login</button>
+    </form>
+    <div id="error" class="error"></div>
+  </div>
+
+  <script>
+    document.getElementById("showPassword").addEventListener("change", function() {
+      const pwd = document.getElementById("password");
+      pwd.type = this.checked ? "text" : "password";
+    });
+
+    function register() {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value.trim();
+      if (!username || !password) {
+        showError("All fields required");
+        return;
+      }
+
+      fetch("/register", {
+        method: "POST",
+        body: new URLSearchParams({ username, password }),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          localStorage.setItem("username", username);
+          window.location.href = "/chat";
+        } else {
+          showError(data.error || "Registration failed");
+        }
+      })
+      .catch(err => showError("Network error"));
+    }
+
+    function login() {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value.trim();
+      if (!username || !password) {
+        showError("Invalid credentials");
+        return;
+      }
+
+      fetch("/login", {
+        method: "POST",
+        body: new URLSearchParams({ username, password }),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          localStorage.setItem("username", username);
+          window.location.href = "/chat";
+        } else {
+          showError(data.error || "Login failed");
+        }
+      })
+      .catch(err => showError("Network error"));
+    }
+
+    function showError(msg) {
+      document.getElementById("error").innerText = msg || "";
+    }
+  </script>
+</body>
+</html>
